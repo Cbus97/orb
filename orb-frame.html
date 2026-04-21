@@ -1,0 +1,1217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body {
+    width:340px;
+    height:420px;
+    background:transparent;
+    overflow:hidden;
+  }
+  /* Position orb at bottom of the frame */
+  #voiceai-beebiyt4n {
+    position:absolute;
+    bottom:0;
+    right:0;
+    width:340px;
+  }
+</style>
+</head>
+<body>
+<!-- Voice AI Floating Orb - v9 Full Enhanced -->
+<div id="voiceai-beebiyt4n">
+  <div class="voiceai-canvas-wrap">
+    <canvas id="voiceai-orb-canvas" width="300" height="300" aria-label="Voice AI Assistant"></canvas>
+    <div class="voiceai-tooltip" id="voiceai-tip">Click to talk &nbsp;•&nbsp; Hold to drag</div>
+  </div>
+  <div class="voiceai-status-msg"></div>
+  <div class="voiceai-connection-badge">
+    <div class="voiceai-conn-dot"></div>
+    <span>Connected</span>
+  </div>
+</div>
+
+<style>
+#voiceai-beebiyt4n {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+#voiceai-beebiyt4n .voiceai-canvas-wrap {
+  position: relative;
+  width: 300px;
+  height: 300px;
+}
+#voiceai-beebiyt4n #voiceai-orb-canvas { display:block; cursor:pointer; }
+#voiceai-beebiyt4n .voiceai-tooltip {
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(175,169,236,0.85);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.3s;
+  pointer-events: none;
+  text-shadow: 0 0 8px rgba(127,119,221,0.5);
+}
+#voiceai-beebiyt4n .voiceai-tooltip.visible { opacity: 1; }
+#voiceai-beebiyt4n .voiceai-status-msg {
+  margin-top: 8px;
+  background: rgba(0,0,0,0.8);
+  color: white;
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s;
+}
+#voiceai-beebiyt4n .voiceai-status-msg.visible { opacity: 1; }
+#voiceai-beebiyt4n .voiceai-connection-badge {
+  margin-top: 8px;
+  background: rgba(16,185,129,0.1);
+  border: 1px solid rgba(16,185,129,0.4);
+  color: rgb(16,185,129);
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s;
+  white-space: nowrap;
+}
+#voiceai-beebiyt4n .voiceai-connection-badge.visible { opacity: 1; }
+#voiceai-beebiyt4n .voiceai-conn-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+  animation: voiceai-dot-pulse 2s infinite;
+}
+@keyframes voiceai-dot-pulse { 0%,100%{opacity:1;} 50%{opacity:0.4;} }
+</style>
+
+<script>
+(function(){
+  'use strict';
+  console.log('[Orb] version 29 loaded');
+
+  const orbC = document.getElementById('voiceai-orb-canvas');
+  const oc   = orbC.getContext('2d');
+  const W=300, H=300, CX=W/2, CY=H/2, R=72, N=160;
+
+  const IDLE_COLS=['#26215C','#3C3489','#534AB7','#7F77DD','#9F99E8','#AFA9EC','#CECBF6'];
+  const SCOLS={
+    idle:     {core:['#AFA9EC','#7F77DD','#534AB7','#26215C'],glow:'127,119,221'},
+    thinking: {core:['#9FE1CB','#1D9E75','#0F6E56','#04342C'],glow:'29,158,117'},
+    speaking: {core:['#AFA9EC','#7F77DD','#534AB7','#26215C'],glow:'175,169,236'},
+  };
+
+  function lerpColor(a,b,t){
+    const ah=parseInt(a.slice(1),16),bh=parseInt(b.slice(1),16);
+    const ar=(ah>>16)&0xff,ag=(ah>>8)&0xff,ab=ah&0xff;
+    const br=(bh>>16)&0xff,bg=(bh>>8)&0xff,bb=bh&0xff;
+    return `rgb(${Math.round(ar+(br-ar)*t)},${Math.round(ag+(bg-ag)*t)},${Math.round(ab+(bb-ab)*t)})`;
+  }
+  function lerp(a,b,t){return a+(b-a)*t;}
+  function eio(x){return x<0.5?2*x*x:1-Math.pow(-2*x+2,2)/2;}
+
+  let targetState='idle', sp=0, tp=0, hp=0, smooth=0;
+  let audioLevel=0, bassLevel=0, midLevel=0, trebleLevel=0, volumeRing=0;
+  let agentLvl=0, micLvl=0;
+  let mx=CX, my=CY, mdist=999, orbT=0;
+  let callLive=false;
+
+  const ripples=[];
+  function addRipple(color,speed){
+    ripples.push({r:R*0.72,maxR:R*2.0,alpha:0.65,color,speed:speed||2.2});
+  }
+
+  const pts=Array.from({length:N},(_,i)=>{
+    const angle=(i/N)*Math.PI*2+Math.random()*0.25;
+    const r=R*(0.45+Math.random()*0.55);
+    const z=Math.random()*2-1;
+    return {
+      x:CX+Math.cos(angle)*r, y:CY+Math.sin(angle)*r,
+      px:CX+Math.cos(angle)*r, py:CY+Math.sin(angle)*r,
+      homeAngle:angle, homeR:r, z,
+      baseSize:(1.2+Math.random()*3.2)*(0.6+0.4*(z+1)/2),
+      idleCol:IDLE_COLS[Math.floor(Math.random()*IDLE_COLS.length)],
+      phase:Math.random()*Math.PI*2,
+      speed:0.3+Math.random()*0.7,
+      pulsePhase:Math.random()*Math.PI*2,
+      pulseSpeed:0.07+Math.random()*0.09,
+      maxPulse:20+Math.random()*45,
+      orbitSpeed:(Math.random()>0.5?1:-1)*(0.003+Math.random()*0.005),
+      thinkRadius:R*(0.82+Math.random()*0.42),
+      thinkPhase:Math.random()*Math.PI*2,
+      band:i%3,
+      shimmer:0, shimmerTarget:0,
+    };
+  });
+
+  let tiltX=0, tiltY=0;
+  if(window.DeviceOrientationEvent){
+    window.addEventListener('deviceorientation',e=>{
+      tiltX=Math.max(-1,Math.min(1,(e.gamma||0)/20));
+      tiltY=Math.max(-1,Math.min(1,(e.beta||0)/20));
+    });
+  }
+
+  function drawFrame(){
+    oc.clearRect(0,0,W,H);
+    sp     += ((targetState==='speaking'?1:0)-sp)*0.06;
+    tp     += ((targetState==='thinking'?1:0)-tp)*0.04;
+    hp     += (Math.min(1,mdist<R*1.5?1-mdist/(R*1.5):0)-hp)*0.09;
+    smooth += (audioLevel-smooth)*0.1;
+    bassLevel   += (audioLevel*1.2-bassLevel)*0.08;
+    midLevel    += (audioLevel*0.9-midLevel)*0.12;
+    trebleLevel += (audioLevel*0.7-trebleLevel)*0.18;
+    volumeRing  += (Math.max(agentLvl,micLvl)-volumeRing)*0.15;
+    orbT += 0.016+sp*0.018+tp*0.007;
+
+    const sc=SCOLS[targetState]||SCOLS.idle;
+    const glowI=Math.min(1.4,sp*1.1+smooth*0.8+tp*0.4+hp*0.3);
+    const tx=tiltX*8, ty=tiltY*8;
+
+    if(glowI>0.01){
+      for(let i=4;i>=1;i--){
+        const g=oc.createRadialGradient(CX+tx,CY+ty,R*0.5,CX+tx,CY+ty,R*0.9+i*22*glowI);
+        g.addColorStop(0,`rgba(${sc.glow},${0.07*glowI/i})`);
+        g.addColorStop(1,`rgba(${sc.glow},0)`);
+        oc.beginPath(); oc.arc(CX+tx,CY+ty,R*0.9+i*22*glowI,0,Math.PI*2);
+        oc.fillStyle=g; oc.globalAlpha=1; oc.fill();
+      }
+    }
+
+    for(let i=ripples.length-1;i>=0;i--){
+      const rp=ripples[i];
+      rp.r+=rp.speed; rp.alpha*=0.93;
+      if(rp.alpha<0.01||rp.r>rp.maxR){ripples.splice(i,1);continue;}
+      oc.beginPath(); oc.arc(CX+tx,CY+ty,rp.r,0,Math.PI*2);
+      oc.strokeStyle=rp.color; oc.lineWidth=1.5;
+      oc.globalAlpha=rp.alpha; oc.stroke(); oc.globalAlpha=1;
+    }
+
+    pts.sort((a,b)=>a.z-b.z);
+    for(const p of pts){
+      p.px=p.x; p.py=p.y;
+      const idleR=p.homeR*(1+0.055*Math.sin(orbT*p.speed+p.phase));
+      const idleAngle=p.homeAngle+orbT*0.16*p.speed;
+      const idleX=Math.cos(idleAngle)*idleR;
+      const idleY=Math.sin(idleAngle)*idleR;
+      const thinkAngle=p.homeAngle+orbT*p.orbitSpeed*55+p.thinkPhase;
+      const thinkR=p.thinkRadius*(1+0.03*Math.sin(orbT*0.5+p.thinkPhase));
+      const thinkX=Math.cos(thinkAngle)*thinkR;
+      const thinkY=Math.sin(thinkAngle)*thinkR;
+      p.pulsePhase+=p.pulseSpeed*(1+smooth*2.2);
+      const pulseCycle=(Math.sin(p.pulsePhase)+1)*0.5;
+      const bandLvl=p.band===0?bassLevel:p.band===1?midLevel:trebleLevel;
+      const pulseAmt=pulseCycle*p.maxPulse*sp*(0.35+bandLvl*1.9);
+      const speakR=p.homeR+pulseAmt;
+      const speakAngle=p.homeAngle+orbT*0.04*p.speed;
+      const speakX=Math.cos(speakAngle)*speakR;
+      const speakY=Math.sin(speakAngle)*speakR;
+      const cursorAngle=Math.atan2(my-CY,mx-CX);
+      const angleDiff=Math.abs(((p.homeAngle-cursorAngle+Math.PI*3)%(Math.PI*2))-Math.PI);
+      const attract=Math.max(0,1-angleDiff/1.2)*hp*10;
+      const hx=Math.cos(cursorAngle)*attract+(mx-CX)*0.12*hp;
+      const hy=Math.sin(cursorAngle)*attract+(my-CY)*0.12*hp;
+      p.shimmerTarget=callLive&&smooth<0.008?(Math.random()<0.01?Math.random()*5:0):0;
+      p.shimmer+=(p.shimmerTarget-p.shimmer)*0.1;
+      const shimX=Math.cos(p.homeAngle+Math.PI/2)*p.shimmer;
+      const shimY=Math.sin(p.homeAngle+Math.PI/2)*p.shimmer;
+      const depthShift=(p.z+1)/2;
+      const ptx=tx*depthShift*0.4;
+      const pty=ty*depthShift*0.4;
+      const bx=lerp(lerp(idleX,thinkX,tp),speakX,eio(Math.min(1,sp*1.1)));
+      const by=lerp(lerp(idleY,thinkY,tp),speakY,eio(Math.min(1,sp*1.1)));
+      p.x=CX+bx+hx+shimX+ptx;
+      p.y=CY+by+hy+shimY+pty;
+      const depthScale=0.55+0.45*depthShift;
+      const depthAlpha=0.35+0.65*depthScale;
+      const sz=p.baseSize*(1+sp*0.3+bandLvl*0.7+hp*0.15)*depthScale;
+      if(sp>0.1){
+        const dx=p.x-p.px, dy=p.y-p.py;
+        if(Math.hypot(dx,dy)>0.5){
+          oc.beginPath(); oc.moveTo(p.x,p.y); oc.lineTo(p.px-dx*3,p.py-dy*3);
+          oc.strokeStyle=p.idleCol; oc.lineWidth=Math.max(0.3,sz*0.45);
+          oc.globalAlpha=depthAlpha*0.22*sp; oc.stroke();
+        }
+      }
+      oc.beginPath(); oc.arc(p.x,p.y,Math.max(0.4,sz),0,Math.PI*2);
+      oc.fillStyle=p.idleCol;
+      oc.globalAlpha=Math.min(1,depthAlpha*(0.5+0.5*(1-sp*0.15)+smooth*0.2));
+      oc.fill();
+    }
+
+    oc.globalAlpha=1;
+    const ca=1-sp*0.88;
+    if(ca>0.01){
+      const cols=sc.core;
+      const g=oc.createRadialGradient(CX+tx*0.3-14,CY+ty*0.3-14,2,CX+tx*0.3,CY+ty*0.3,R*0.72);
+      g.addColorStop(0,cols[0]); g.addColorStop(0.4,cols[1]);
+      g.addColorStop(0.75,cols[2]); g.addColorStop(1,cols[3]);
+      oc.beginPath();
+      oc.arc(CX+tx*0.3,CY+ty*0.3,R*0.72*(1-sp*0.45)*(1+hp*0.04),0,Math.PI*2);
+      oc.globalAlpha=ca; oc.fillStyle=g; oc.fill(); oc.globalAlpha=1;
+    }
+    requestAnimationFrame(drawFrame);
+  }
+  drawFrame();
+
+  const tipEl=document.getElementById('voiceai-tip');
+  orbC.addEventListener('mousemove',e=>{
+    const r=orbC.getBoundingClientRect();
+    mx=(e.clientX-r.left)*(W/r.width); my=(e.clientY-r.top)*(H/r.height);
+    mdist=Math.hypot(mx-CX,my-CY); tipEl.classList.add('visible');
+  });
+  orbC.addEventListener('mouseleave',()=>{mx=CX;my=CY;mdist=999;tipEl.classList.remove('visible');});
+
+  function orbSetState(s){
+    if(targetState===s) return;
+    const prev=targetState; targetState=s;
+    tipEl.textContent=s==='idle'?'Click to talk  •  Hold to drag':'Click to end';
+    if(s==='speaking'&&prev!=='speaking'){
+      addRipple('rgba(175,169,236,0.6)',2.2);
+      addRipple('rgba(127,119,221,0.3)',3.2);
+    }
+  }
+  function orbSpeak(){orbSetState('speaking');}
+  function orbThink(){orbSetState('thinking');}
+  function orbIdle() {orbSetState('idle');}
+
+  const SPEAK_THRESH  = 0.010;
+  const SILENCE_THRESH= 0.007;
+  const SILENCE_MS    = 700;
+
+  let audioCtx=null;
+  let agentAnalyser=null, micAnalyser=null;
+  let agentData=null, micData=null;
+  let silenceTimer=null;
+  const sourcedStreams=new WeakSet();
+
+  function initAudioCtx(){
+    if(audioCtx) return;
+    try{
+      audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+      if(audioCtx.state==='suspended') audioCtx.resume();
+      agentAnalyser=audioCtx.createAnalyser();
+      agentAnalyser.fftSize=512;
+      agentAnalyser.smoothingTimeConstant=0.5;
+      agentData=new Uint8Array(agentAnalyser.frequencyBinCount);
+      micAnalyser=audioCtx.createAnalyser();
+      micAnalyser.fftSize=512;
+      micAnalyser.smoothingTimeConstant=0.5;
+      micData=new Uint8Array(micAnalyser.frequencyBinCount);
+      startLevelLoop();
+    }catch(e){console.error('[Orb] initAudioCtx:',e);}
+  }
+
+  let agentSourceNode=null;
+  function connectAgentStream(stream){
+    if(!audioCtx||!agentAnalyser||!stream) return;
+    if(sourcedStreams.has(stream)) return;
+    try{
+      if(agentSourceNode){try{agentSourceNode.disconnect();}catch(_){}}
+      agentSourceNode=audioCtx.createMediaStreamSource(stream);
+      agentSourceNode.connect(agentAnalyser);
+      sourcedStreams.add(stream);
+      console.log('[Orb] agent tapped');
+    }catch(e){console.warn('[Orb] connectAgentStream:',e);}
+  }
+
+  let micSourceNode=null;
+  function connectMicStream(stream){
+    if(!audioCtx||!micAnalyser||!stream) return;
+    if(sourcedStreams.has(stream)) return;
+    try{
+      if(micSourceNode){try{micSourceNode.disconnect();}catch(_){}}
+      micSourceNode=audioCtx.createMediaStreamSource(stream);
+      micSourceNode.connect(micAnalyser);
+      sourcedStreams.add(stream);
+      console.log('[Orb] mic tapped');
+    }catch(e){console.warn('[Orb] connectMicStream:',e);}
+  }
+
+  function getBandLevel(data,startBin,endBin){
+    let s=0; for(let i=startBin;i<endBin;i++) s+=data[i];
+    return (s/(endBin-startBin))/255;
+  }
+
+  function startLevelLoop(){
+    (function poll(){
+      if(agentAnalyser&&agentData){
+        agentAnalyser.getByteFrequencyData(agentData);
+        let s=0; for(let i=0;i<agentData.length;i++) s+=agentData[i];
+        agentLvl=(s/agentData.length)/255;
+        const bins=agentData.length;
+        bassLevel   += (getBandLevel(agentData,0,Math.floor(bins*0.1))-bassLevel)*0.1;
+        midLevel    += (getBandLevel(agentData,Math.floor(bins*0.1),Math.floor(bins*0.4))-midLevel)*0.12;
+        trebleLevel += (getBandLevel(agentData,Math.floor(bins*0.4),bins)-trebleLevel)*0.18;
+      }
+      if(micAnalyser&&micData){
+        micAnalyser.getByteFrequencyData(micData);
+        let s=0; for(let i=0;i<micData.length;i++) s+=micData[i];
+        micLvl=(s/micData.length)/255;
+        const bins=micData.length;
+        bassLevel   += (getBandLevel(micData,0,Math.floor(bins*0.1))-bassLevel)*0.06;
+        midLevel    += (getBandLevel(micData,Math.floor(bins*0.1),Math.floor(bins*0.4))-midLevel)*0.07;
+        trebleLevel += (getBandLevel(micData,Math.floor(bins*0.4),bins)-trebleLevel)*0.1;
+      }
+      if(callLive){
+        const combined=Math.max(agentLvl,micLvl);
+        audioLevel=combined;
+        if(combined>SPEAK_THRESH){
+          if(silenceTimer){clearTimeout(silenceTimer);silenceTimer=null;}
+          if(targetState!=='speaking') orbSpeak();
+        }else if(combined<SILENCE_THRESH&&targetState==='speaking'){
+          if(!silenceTimer) silenceTimer=setTimeout(()=>{silenceTimer=null;orbIdle();},SILENCE_MS);
+        }
+      }
+      requestAnimationFrame(poll);
+    })();
+  }
+
+  function getTrackStream(track){
+    if(track.mediaStream&&track.mediaStream.active) return track.mediaStream;
+    if(track.mediaStreamTrack) return new MediaStream([track.mediaStreamTrack]);
+    return null;
+  }
+
+  /* ═══════════════════════════════════════════════════════
+     RECORDING ENGINE
+     Two separate MediaRecorder instances — one for mic, one for agent.
+     Each uploads to Cloudinary separately. Both URLs go to GHL
+     contact.Orb_record field and a note on the contact record.
+  ═══════════════════════════════════════════════════════ */
+  const CLOUDINARY_CLOUD_NAME   = 'dtkxpklqj';
+  const CLOUDINARY_UPLOAD_PRESET = 'call_record';
+  const GHL_API_KEY              = 'YOUR_GHL_API_KEY'; /* ← only thing to replace */
+  const GHL_LOCATION_ID          = 'kEZa3kyVbYmLdX76FDL0';
+  const GHL_WEBHOOK_URL          = 'https://services.leadconnectorhq.com/hooks/kEZa3kyVbYmLdX76FDL0/webhook-trigger/31ccc74b-6a90-40bb-866f-e59ff3dc38ab';
+
+  let recMicRecorder   = null;
+  let recAgentRecorder = null;
+  let recMicChunks     = [];
+  let recAgentChunks   = [];
+  let currentMicStream = null;
+
+  /* Name/company extraction removed — Retell/GHL handles contact
+     creation from the call transcript automatically */
+
+
+  /* ═══════════════════════════════════════════════════════
+     NAVIGATION ENGINE
+     Two methods work together:
+     1. Retell custom function — AI explicitly fires a
+        "navigate" tool call, orb receives it via DataReceived
+        and goes to the URL. Set up in GHL voice AI config.
+     2. Transcript intent matching — fallback that scans
+        user speech for navigation phrases and maps them
+        to site pages defined in NAV_PAGES below.
+  ═══════════════════════════════════════════════════════ */
+
+  /* ── Define your site pages here ──────────────────────
+     Add as many as you need. The keywords array is what
+     the user might say to get to that page.
+     The orb shows a brief "Taking you there..." message
+     before navigating so it doesn't feel abrupt.
+  ─────────────────────────────────────────────────────── */
+  const NAV_PAGES=[
+    {
+      url:'/',
+      keywords:['home','homepage','home page','main page','start','beginning','front page','go home'],
+    },
+    {
+      url:'/appointment',
+      keywords:['appointment','book','booking','schedule','book a call','book a meeting','set up a time','reserve','calendar','demo','book a demo'],
+    },
+    {
+      url:'/About',
+      keywords:['about','about you','who are you','your background','your story','tell me about yourself','about boost'],
+    },
+    {
+      url:'/services',
+      keywords:['services','what you offer','what do you do','your services','offerings','what services','all services'],
+    },
+    {
+      url:'/service-detailed-page',
+      keywords:['details','detailed','more details','more information','tell me more','learn more','detail page','service details'],
+    },
+    {
+      url:'/contact-us',
+      keywords:['contact','contact us','get in touch','reach you','talk to someone','speak to someone','call you','email you'],
+    },
+    {
+      url:'/blog',
+      keywords:['blog','articles','posts','read','news','updates','latest'],
+    },
+    {
+      url:'/crm',
+      keywords:['crm','customer relationship','contacts','contact management','leads','pipeline','manage contacts'],
+    },
+    {
+      url:'/ai-voice-assistant',
+      keywords:['ai voice','voice assistant','voice ai','ai assistant','voice agent','ai agent','voice orb','orb','the orb'],
+    },
+    {
+      url:'https://chat.boost.ceo/',
+      keywords:['chat','live chat','talk to someone','speak to a person','human','chat with us'],
+    },
+    {
+      url:'/website-and-funnel-builder',
+      keywords:['website','website builder','funnel','funnel builder','build a website','web design','landing page'],
+    },
+    {
+      url:'/social-media-management',
+      keywords:['social media','social media management','manage social','facebook','instagram','social posts','social'],
+    },
+    {
+      url:'/reviews-and-reputation-management',
+      keywords:['reviews','reputation','reputation management','google reviews','manage reviews','review management'],
+    },
+    {
+      url:'/email-campaigns',
+      keywords:['email campaigns','email marketing','email newsletter','email blasts','email'],
+    },
+    {
+      url:'/booking',
+      keywords:['booking','book now','boost booking','boost sign up','sign up','get started','boost program'],
+    },
+    {
+      url:'/communications-hub',
+      keywords:['communications','communications hub','messaging','inbox','chat hub','unified inbox'],
+    },
+    {
+      url:'/social-and-sem-ads',
+      keywords:['ads','advertising','social ads','sem','google ads','paid ads','facebook ads','digital advertising','sem ads'],
+    },
+    {
+      url:'/contacts-and-signatures',
+      keywords:['contracts','signatures','sign a contract','digital signature','e-sign','agreements','contracts and signatures'],
+    },
+    {
+      url:'/email-leads-campaign',
+      keywords:['email leads','lead campaign','email lead','leads campaign','email leads campaign'],
+    },
+    {
+      url:'/local-business-listings',
+      keywords:['local listings','business listings','local business','google business','local seo','citations','local business listings'],
+    },
+    {
+      url:'/credit-card-processing',
+      keywords:['credit card','credit card processing','card processing','payment processing','accept payments'],
+    },
+    {
+      url:'/point-of-sale',
+      keywords:['point of sale','pos','point of sale system','pos system'],
+    },
+    {
+      url:'/online-ordering',
+      keywords:['online ordering','order online','online store','ecommerce','take orders','ordering system'],
+    },
+    {
+      url:'/billing',
+      keywords:['billing','invoices','invoice','payments','pay','subscription'],
+    },
+    {
+      url:'/phone-numbers',
+      keywords:['phone numbers','phone number','get a number','business phone','virtual number'],
+    },
+    {
+      url:'https://app.boost.ceo',
+      keywords:['login','log in','sign in','my account','dashboard','app','portal','client portal'],
+    },
+    {
+      url:'https://help.boost.ceo',
+      keywords:['help','support','help center','knowledge base','faq','how do i','troubleshoot','documentation'],
+    },
+  ];
+
+  /* Navigation phrases that signal intent to go somewhere */
+  const NAV_INTENTS=[
+    'take me to','go to','navigate to','show me','open','bring me to',
+    'i want to see','can you take me','can you show me','let me see',
+  ];
+
+  let navPending=false;    /* prevent double-navigation */
+
+  function checkNavIntent(text){
+    if(navPending) return;
+    const lower=text.toLowerCase();
+    const hasIntent=NAV_INTENTS.some(phrase=>lower.includes(phrase));
+    if(!hasIntent) return;
+    for(const page of NAV_PAGES){
+      if(page.keywords.some(kw=>lower.includes(kw))){
+        console.log('[Nav] navigating to',page.url);
+        navigateTo(page.url);
+        return;
+      }
+    }
+  }
+
+  /* Base site URL — orb is hosted on GitHub Pages so we need
+     to explicitly point navigation at the real site */
+  const SITE_BASE='https://boost.ceo';
+
+  function navigateTo(url){
+    if(navPending) return;
+    navPending=true;
+    const statusEl=document.querySelector('#voiceai-beebiyt4n .voiceai-status-msg');
+    if(statusEl){
+      statusEl.textContent='Taking you there…';
+      statusEl.classList.add('visible');
+      statusEl.style.background='rgba(83,74,183,0.9)';
+    }
+    addRipple('rgba(175,169,236,0.6)',2.5);
+    addRipple('rgba(127,119,221,0.3)',3.5);
+    setTimeout(()=>{
+      const fullUrl=url.startsWith('http')?url:SITE_BASE+url;
+      /* Use postMessage to tell parent to navigate —
+         pass orb-navigate with preserveHash flag so session survives */
+      window.parent.postMessage({type:'orb-navigate',url:fullUrl,preserveHash:true},'*');
+    },1800);
+  }
+
+  /* Pick best supported MIME type for this browser */
+  function bestMime(){
+    if(MediaRecorder.isTypeSupported('audio/mp4;codecs=mp4a.40.2')) return 'audio/mp4;codecs=mp4a.40.2';
+    if(MediaRecorder.isTypeSupported('audio/webm;codecs=opus'))     return 'audio/webm;codecs=opus';
+    return '';
+  }
+
+  function recStartMic(stream){
+    if(!stream) return;
+    try{
+      recMicChunks=[];
+      const mime=bestMime();
+      recMicRecorder=new MediaRecorder(stream, mime?{mimeType:mime}:{});
+      recMicRecorder.ondataavailable=e=>{if(e.data.size>0) recMicChunks.push(e.data);};
+      recMicRecorder.start(1000);
+      console.log('[Rec] mic recorder started, format:',mime||'default');
+    }catch(e){console.warn('[Rec] mic recorder failed:',e);}
+  }
+
+  function recStartAgent(stream){
+    if(!stream) return;
+    try{
+      /* Clone track so recorder doesn't interfere with playback */
+      const tracks=stream.getAudioTracks();
+      if(!tracks.length) return;
+      const recStream=new MediaStream([tracks[0].clone()]);
+      recAgentChunks=[];
+      const mime=bestMime();
+      recAgentRecorder=new MediaRecorder(recStream, mime?{mimeType:mime}:{});
+      recAgentRecorder.ondataavailable=e=>{if(e.data.size>0) recAgentChunks.push(e.data);};
+      recAgentRecorder.start(1000);
+      console.log('[Rec] agent recorder started, format:',mime||'default');
+    }catch(e){console.warn('[Rec] agent recorder failed:',e);}
+  }
+
+  function recStop(){
+    if(recMicRecorder  &&recMicRecorder.state  !=='inactive') recMicRecorder.stop();
+    if(recAgentRecorder&&recAgentRecorder.state!=='inactive') recAgentRecorder.stop();
+  }
+
+  function recUpload(){
+    /* Wait for final chunks to flush */
+    setTimeout(()=>{
+      const filename='call-'+new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
+      const agentMime=recAgentRecorder?.mimeType||'audio/webm';
+      const micMime  =recMicRecorder?.mimeType  ||'audio/webm';
+      const agentExt =agentMime.includes('mp4')?'m4a':'webm';
+      const micExt   =micMime.includes('mp4')  ?'m4a':'webm';
+
+      const uploads=[];
+      if(recAgentChunks.length){
+        const blob=new Blob(recAgentChunks,{type:agentMime});
+        console.log('[Rec] uploading agent:',filename+'-agent.'+agentExt,'size:',blob.size);
+        uploads.push(uploadToCloudinary(blob, filename+'-agent.'+agentExt));
+      } else {
+        uploads.push(Promise.resolve(null));
+      }
+      if(recMicChunks.length){
+        const blob=new Blob(recMicChunks,{type:micMime});
+        console.log('[Rec] uploading mic:',filename+'-mic.'+micExt,'size:',blob.size);
+        uploads.push(uploadToCloudinary(blob, filename+'-mic.'+micExt));
+      } else {
+        uploads.push(Promise.resolve(null));
+      }
+
+      Promise.all(uploads).then(([agentUrl, micUrl])=>{
+        console.log('[Rec] uploads done — agent:',agentUrl,'mic:',micUrl);
+        /* Fire webhook with recording URLs */
+        if(micUrl||agentUrl){
+          pushToGHL(agentUrl, micUrl, filename);
+        }
+      });
+    }, 1200);
+  }
+
+  function uploadToCloudinary(blob, filename){
+    if(CLOUDINARY_CLOUD_NAME==='YOUR_CLOUD_NAME') return Promise.resolve(null);
+    const form=new FormData();
+    form.append('file', blob, filename);
+    form.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+    form.append('resource_type', 'video');
+    form.append('folder', 'call-recordings');
+    /* Embed caller info in context — Cloudinary passes this through
+       in the webhook payload as context.custom.caller_name etc.
+       Your GHL workflow can then use these to find/create the contact. */
+    const ctx=[
+      'caller_name='+(window._callerName||'Unknown'),
+      'caller_phone='+(window._callerPhone||''),
+      'page_url='+window.location.href,
+      'recorded_at='+new Date().toISOString(),
+    ].join('|');
+    form.append('context', ctx);
+    return fetch('https://api.cloudinary.com/v1_1/'+CLOUDINARY_CLOUD_NAME+'/video/upload',{
+      method:'POST', body:form
+    })
+      .then(r=>r.json())
+      .then(d=>{ console.log('[Rec] cloudinary:',d.secure_url||d.error); return d.secure_url||null; })
+      .catch(e=>{ console.error('[Rec] cloudinary error:',e); return null; });
+  }
+
+  /* pushToGHL — two paths:
+     1. Direct API: finds/creates contact, adds tag, writes Orb_record, adds note
+     2. Webhook: fires to GHL workflow as backup/trigger */
+  async function pushToGHL(agentUrl, micUrl, filename){
+    const recUrl=micUrl||agentUrl||'';
+    if(!recUrl) return;
+
+    const name    = window._callerName||'';
+    const phone   = window._callerPhone||'';
+    const company = window._callerCompany||'';
+    console.log('[GHL] pushing — name:',name,'phone:',phone,'company:',company);
+
+    /* ── 1. Webhook ── */
+    const payload={
+      secure_url:     recUrl,
+      agent_url:      agentUrl||'',
+      ghl_contact_id: window._ghlContactId||'',
+      caller_name:    name,
+      caller_phone:   phone,
+      caller_company: company,
+      page_url:       window.location.href,
+      recorded_at:    new Date().toISOString(),
+    };
+    fetch(GHL_WEBHOOK_URL,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(payload),
+    })
+      .then(r=>console.log('[GHL] webhook fired, status:',r.status))
+      .catch(e=>console.error('[GHL] webhook error:',e));
+
+    /* ── 2. Direct API — FIND ONLY, never create ── */
+    if(GHL_API_KEY==='YOUR_GHL_API_KEY') return;
+    const headers={
+      'Authorization':'Bearer '+GHL_API_KEY,
+      'Content-Type':'application/json',
+      'Version':'2021-07-28',
+    };
+    const GHL='https://services.leadconnectorhq.com';
+    try{
+      let contactId=null;
+
+      /* Try phone lookup first — most reliable */
+      if(phone){
+        const sr=await fetch(GHL+'/contacts/lookup?phone='+encodeURIComponent('+1'+phone),{headers});
+        if(sr.ok){
+          const sd=await sr.json();
+          if(sd.contacts&&sd.contacts.length){
+            contactId=sd.contacts[0].id;
+            console.log('[GHL] found by phone:',contactId);
+          }
+        }
+      }
+
+      /* Try name search — GHL created this contact during the call */
+      if(!contactId&&name){
+        const sr=await fetch(GHL+'/contacts/?locationId='+GHL_LOCATION_ID+'&query='+encodeURIComponent(name)+'&limit=1',{headers});
+        if(sr.ok){
+          const sd=await sr.json();
+          const contacts=sd.contacts||sd.contact||[];
+          if(contacts.length){
+            contactId=contacts[0].id;
+            console.log('[GHL] found by name:',contactId);
+          }
+        }
+      }
+
+      /* DO NOT create — GHL already made this contact during the call.
+         If we can't find it, the webhook has the URL and GHL workflow
+         can match it. Just log and stop. */
+      if(!contactId){
+        console.log('[GHL] contact not found for',name,phone,'— recording URL sent via webhook');
+        return;
+      }
+
+      /* Found — update Orb_record and add note */
+      await fetch(GHL+'/contacts/'+contactId,{
+        method:'PUT',headers,
+        body:JSON.stringify({
+          tags:['web-call'],
+          customFields:[{id:'OGHUep41Zoznh7kWJHOm', field_value:recUrl}],
+        }),
+      });
+      console.log('[GHL] Orb_record updated on existing contact:',contactId);
+
+      const noteBody=[
+        'Web call recording — '+(name||'Unknown visitor'),
+        'Date: '+new Date().toLocaleString(),
+        'Page: '+window.location.href,
+        'Caller audio: '+recUrl,
+        agentUrl?'AI audio: '+agentUrl:'',
+      ].filter(Boolean).join('\n');
+
+      await fetch(GHL+'/contacts/'+contactId+'/notes',{
+        method:'POST',headers,
+        body:JSON.stringify({body:noteBody}),
+      });
+      console.log('[GHL] note added to existing contact');
+
+    }catch(e){ console.error('[GHL] API error:',e); }
+  }
+
+
+  if(typeof window.LivekitClient==='undefined'){
+    const s=document.createElement('script');
+    s.src='https://cdn.jsdelivr.net/npm/livekit-client@1.15.4/dist/livekit-client.umd.min.js';
+    s.defer=true;
+    document.head.appendChild(s);
+    s.onload=()=>initVoice();
+    s.onerror=()=>showStatus('SDK load failed','error');
+  }else{initVoice();}
+
+  function initVoice(){
+    const container=document.getElementById('voiceai-beebiyt4n');
+    if(!container) return;
+
+    const CFG={
+      locationId:      'kEZa3kyVbYmLdX76FDL0',
+      widgetId:        '69cfec3b26d68b4e0744a341',
+      voiceAiConfigId: '69cfe20ea2de780aeb875763',
+      apiEndpoint:     'https://services.leadconnectorhq.com/chat-widget/public/start-voice-ai-call/',
+      livekitUrl:      'wss://retell-ai-4ihahnq7.livekit.cloud',
+    };
+
+    let room=null, callState='idle';
+    const statusEl=container.querySelector('.voiceai-status-msg');
+    const connEl=container.querySelector('.voiceai-connection-badge');
+
+    function showStatus(msg,type){
+      statusEl.textContent=msg;
+      statusEl.classList.add('visible');
+      statusEl.style.background=type==='error'?'rgba(220,38,38,0.9)':'rgba(0,0,0,0.8)';
+      clearTimeout(statusEl._t);
+      statusEl._t=setTimeout(()=>statusEl.classList.remove('visible'),3500);
+    }
+    function failCall(msg){
+      console.error('[Orb]',msg);
+      showStatus(msg,'error');
+      callLive=false; callState='idle';
+      audioLevel=0; agentLvl=0; micLvl=0;
+      orbIdle();
+    }
+
+    function uid(){
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{
+        const r=Math.random()*16|0;return(c==='x'?r:(r&0x3|0x8)).toString(16);
+      });
+    }
+    function mongoId(){
+      return Math.floor(Date.now()/1000).toString(16).padStart(8,'0')+
+             Array.from({length:16},()=>Math.floor(Math.random()*16).toString(16)).join('');
+    }
+    function contactId(){
+      const c='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+      return Array.from({length:20},()=>c[Math.floor(Math.random()*c.length)]).join('');
+    }
+
+    function tryConnectExistingTracks(){
+      if(!room) return;
+      try{
+        for(const p of room.remoteParticipants.values()){
+          for(const pub of p.trackPublications.values()){
+            if(pub.track&&pub.track.kind===window.LivekitClient.Track.Kind.Audio){
+              const el=pub.track.attach();
+              el.setAttribute('data-voiceai-audio','voiceai-beebiyt4n');
+              document.body.appendChild(el);
+              const stream=getTrackStream(pub.track);
+              if(stream){ connectAgentStream(stream); recStartAgent(stream); }
+            }
+          }
+        }
+      }catch(e){console.warn('[Orb] tryConnectExistingTracks:',e);}
+    }
+
+    async function startCall(){
+      if(callState!=='idle') return;
+      callState='connecting';
+      window._callerName=''; window._callerPhone=''; window._callerCompany=''; window._ghlContactId='';
+
+      initAudioCtx();
+
+      let micStream=null;
+      try{
+        /* On Android, requesting mic with echoCancellation:true signals
+           to the OS that this is a phone call, routing audio to the
+           call volume stream. Using echoCancellation:false keeps it
+           in the media audio stream controlled by media volume.
+           LiveKit handles echo cancellation internally anyway. */
+        micStream=await navigator.mediaDevices.getUserMedia({
+          audio:{
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl:  false,
+          },
+          video:false
+        });
+        currentMicStream=micStream;
+        connectMicStream(micStream);
+        recStartMic(micStream);
+      }catch(e){
+        failCall('Microphone access denied — please allow mic and try again');
+        return;
+      }
+
+      orbThink();
+      showStatus('Connecting…','');
+      addRipple('rgba(175,169,236,0.5)',2.0);
+
+      try{
+        const sessionId=uid();
+        const res=await fetch(CFG.apiEndpoint+CFG.voiceAiConfigId,{
+          method:'POST',
+          headers:{'Content-Type':'application/json','Accept':'*/*'},
+          body:JSON.stringify({
+            contactId:contactId(),callId:mongoId(),
+            widgetId:CFG.widgetId,locationId:CFG.locationId,
+            sessionId,sessionFingerprint:uid(),
+            eventData:{
+              source:'direct',referrer:document.referrer||'',
+              keyword:'',adSource:'',url_params:{},
+              page:{url:window.location.href,title:document.title},
+              timestamp:Date.now(),campaign:'',
+              contactSessionIds:{ids:[sessionId]},
+              type:'page-visit',pageVisitType:'text-widget',
+              domain:window.location.hostname,version:'v3',
+              parentId:'',parentName:'',fingerprint:null,
+              documentURL:window.location.href,
+            },
+          }),
+        });
+        if(!res.ok) throw new Error('API error: '+res.status);
+        const data=await res.json();
+
+        room=new window.LivekitClient.Room({
+          adaptiveStream:true,dynacast:true,
+          audioCaptureDefaults:{autoGainControl:true,echoCancellation:true,noiseSuppression:true},
+          /* webAudioMix intentionally omitted — on Android it routes
+             through Web Audio which still ends up on call volume stream */
+        });
+
+        room.on(window.LivekitClient.RoomEvent.TrackSubscribed,(track,pub,participant)=>{
+          if(track.kind!==window.LivekitClient.Track.Kind.Audio) return;
+          console.log('[Orb] agent audio from',participant.identity);
+          const el=track.attach();
+          el.setAttribute('data-voiceai-audio','voiceai-beebiyt4n');
+          /* Force media audio stream routing on Android.
+             setSinkId('') routes to the default media output (speaker/headphone)
+             which responds to the media volume rocker, not call volume. */
+          document.body.appendChild(el);
+          const stream=getTrackStream(track);
+          if(stream){
+            connectAgentStream(stream);
+            recStartAgent(stream);
+          }else{
+            const iv=setInterval(()=>{
+              const s=getTrackStream(track);
+              if(s){clearInterval(iv);connectAgentStream(s);recStartAgent(s);}
+            },200);
+          }
+        });
+
+        room.on(window.LivekitClient.RoomEvent.LocalTrackPublished,(pub)=>{
+          if(pub.kind!==window.LivekitClient.Track.Kind.Audio) return;
+          const stream=pub.track?.mediaStream
+            ||(pub.track?.mediaStreamTrack?new MediaStream([pub.track.mediaStreamTrack]):null);
+          if(stream) connectMicStream(stream);
+        });
+
+        /* Extract caller info + navigation intent from live transcript */
+        room.on(window.LivekitClient.RoomEvent.DataReceived,(payload)=>{
+          try{
+            const msg=JSON.parse(new TextDecoder().decode(payload));
+
+            /* Retell custom function — AI fires navigate tool with url */
+            if(msg.event_type==='custom_function_call'&&msg.name==='navigate'){
+              const url=msg.arguments?.url||msg.arguments?.page||'';
+              if(url){ console.log('[Nav] custom function →',url); navigateTo(url); }
+            }
+
+            /* Live transcript — navigation intent + basic info capture */
+            if(msg.transcript){
+              const userTurns=msg.transcript.filter(t=>t.role==='user');
+              const latest=userTurns[userTurns.length-1]?.content||'';
+              checkNavIntent(latest);
+              /* Capture name and phone from full transcript as simple fallback.
+                 Just grab the first short user utterance as name,
+                 and any 10-digit number as phone. */
+              if(!window._callerName||!window._callerPhone){
+                const allUser=userTurns.map(t=>t.content||'').join(' ');
+                /* Phone — reliable, just find digits */
+                if(!window._callerPhone){
+                  const ph=allUser.match(/\d{10}|\(\d{3}\)\s*\d{3}[-.\s]\d{4}|\d{3}[-.\s]\d{3}[-.\s]\d{4}/);
+                  if(ph) window._callerPhone=ph[0].replace(/\D/g,'');
+                }
+                /* Name — first utterance that is 1-2 short words, capitalised */
+                if(!window._callerName&&userTurns.length>0){
+                  for(const turn of userTurns){
+                    const t=(turn.content||'').trim();
+                    if(/^[A-Z][a-z]{1,14}(\s[A-Z][a-z]{1,14})?[.,]?\s*$/.test(t)){
+                      window._callerName=t.replace(/[.,]+$/,'').trim();
+                      break;
+                    }
+                  }
+                }
+              }
+            }
+            /* Log all event types once so we can see what's available */
+            if(!window._eventsLogged){
+              window._eventsLogged={};
+            }
+            if(msg.event_type&&!window._eventsLogged[msg.event_type]){
+              window._eventsLogged[msg.event_type]=true;
+              console.log('[DataReceived] event_type:',msg.event_type,'data:',JSON.stringify(msg).slice(0,400));
+            }
+            /* Retell metadata — may contain contact ID or collected variables */
+            if(msg.event_type==='metadata'&&msg.data){
+              console.log('[Metadata] full data:',JSON.stringify(msg.data));
+              if(msg.data.name)       window._callerName=msg.data.name;
+              if(msg.data.phone)      window._callerPhone=msg.data.phone;
+              if(msg.data.company)    window._callerCompany=msg.data.company;
+              if(msg.data.contact_id) window._ghlContactId=msg.data.contact_id;
+              if(msg.data.contactId)  window._ghlContactId=msg.data.contactId;
+            }
+            /* Update event — may contain call variables with contact ID */
+            if(msg.event_type==='update'){
+              if(msg.call?.metadata?.contact_id) window._ghlContactId=msg.call.metadata.contact_id;
+              if(msg.call?.metadata?.contactId)  window._ghlContactId=msg.call.metadata.contactId;
+            }
+
+          }catch(_){}
+        });
+
+        room.on(window.LivekitClient.RoomEvent.Disconnected,reason=>{
+          console.log('[Orb] disconnected:',reason);
+          if(callState==='active') endCall();
+        });
+
+        await room.connect(CFG.livekitUrl,data.accessToken);
+        tryConnectExistingTracks();
+
+        /* Android fix: calling startAudio() after connect forces the
+           AudioContext to initialize in media mode rather than voice
+           call mode, which makes the media volume rocker control it.
+           Must be called from a user-gesture context — we're inside
+           the click handler chain so this is safe. */
+        try{ await room.startAudio(); }catch(_){}
+
+        await room.localParticipant.setMicrophoneEnabled(true);
+
+        callState='active';
+        callLive=true;
+        orbIdle();
+        connEl.classList.add('visible');
+        showStatus('Connected — click to end','');
+
+
+
+      }catch(err){
+        if(micStream) micStream.getTracks().forEach(t=>t.stop());
+        failCall('Failed: '+err.message);
+      }
+    }
+
+    async function endCall(){
+      if(callState!=='active') return;
+      callState='ending';
+      callLive=false;
+      agentLvl=0; micLvl=0; audioLevel=0;
+      if(silenceTimer){clearTimeout(silenceTimer);silenceTimer=null;}
+      addRipple('rgba(127,119,221,0.4)',1.8);
+      orbIdle();
+      /* Stop recorders — webhook fires after Cloudinary upload completes
+         by which time the name is captured from transcript */
+      recStop();
+      recUpload();
+
+      try{
+        if(room){await room.disconnect();room=null;}
+        document.querySelectorAll('[data-voiceai-audio="voiceai-beebiyt4n"]').forEach(el=>el.remove());
+        connEl.classList.remove('visible');
+        showStatus('Call ended','');
+      }catch(err){
+        console.error('[Orb] endCall error:',err);
+      }finally{
+        callState='idle';
+      }
+    }
+
+        orbC.addEventListener('click',()=>{
+      if(window._orbSuppressClick) return;
+      addRipple('rgba(175,169,236,0.5)',2.2);
+      if(callState==='active')    endCall();
+      else if(callState==='idle') startCall();
+    });
+
+    /* Touch — tap to talk, but ignore if parent signals drag mode */
+    window.addEventListener('message',function(e){
+      if(e.data&&e.data.type==='orb-ignore-touch') window._orbIgnoreNextTouch=true;
+    });
+
+    orbC.addEventListener('touchend',function(e){
+      if(window._orbIgnoreNextTouch){
+        window._orbIgnoreNextTouch=false;
+        return;
+      }
+      e.preventDefault();
+      addRipple('rgba(175,169,236,0.5)',2.2);
+      if(callState==='active')    endCall();
+      else if(callState==='idle') startCall();
+    },{passive:false});
+
+    window.addEventListener('beforeunload',()=>{
+      if(room) room.disconnect();
+    });
+
+    /* Auto-reconnect: parent pushes session when iframe is ready.
+       We listen for it rather than polling. */
+    window.addEventListener('message',function(e){
+      if(!e.data||e.data.type!=='orb-session-push') return;
+      if(callState!=='idle') return; /* already in a call */
+      if(!e.data.session) return;
+      try{
+        const session=JSON.parse(e.data.session);
+        if(!session||!session.accessToken) return;
+        if(Date.now()-session.timestamp>5*60*1000) return; /* expired */
+        console.log('[Orb] session pushed from parent, reconnecting...');
+        doReconnect(session);
+      }catch(err){ console.log('[Orb] session push error:',err.message); }
+    });
+
+    /* Also request once after a short delay as fallback */
+    setTimeout(function(){
+      if(callState!=='idle') return;
+      window.parent.postMessage({type:'orb-get-session'},'*');
+    },500);
+  }
+
+})();
+</script>
+
+<script>
+/* Drag handling — desktop only via mousemove threshold */
+(function(){
+  const canvas=document.getElementById('voiceai-orb-canvas');
+  if(!canvas) return;
+  canvas.style.cursor='grab';
+
+  var mouseDown=false, hasDragged=false;
+  var downX=0, downY=0;
+
+  canvas.addEventListener('mousedown',e=>{
+    mouseDown=true; hasDragged=false;
+    downX=e.clientX; downY=e.clientY;
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove',e=>{
+    if(!mouseDown) return;
+    var dx=Math.abs(e.clientX-downX);
+    var dy=Math.abs(e.clientY-downY);
+    if(!hasDragged&&(dx>5||dy>5)){
+      hasDragged=true;
+      canvas.style.cursor='grabbing';
+      window.parent.postMessage({type:'orb-dragstart',x:downX,y:downY},'*');
+    }
+  });
+
+  /* Only reset cursor on mouseup — parent handles orb-dragend */
+  document.addEventListener('mouseup',()=>{
+    if(hasDragged){
+      window._orbSuppressClick=true;
+      setTimeout(function(){ window._orbSuppressClick=false; },100);
+    }
+    mouseDown=false; hasDragged=false;
+    canvas.style.cursor='grab';
+  });
+
+  /* Mobile: long press to drag, sends postMessage to parent */
+  var isMobile=/Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  if(isMobile){
+    var lpTimer=null, lpStartX=0, lpStartY=0, lpDragging=false, lpLastX=null, lpLastY=null;
+
+    canvas.addEventListener('touchstart',function(e){
+      lpStartX=e.touches[0].clientX;
+      lpStartY=e.touches[0].clientY;
+      lpDragging=false;
+      lpTimer=setTimeout(function(){
+        lpDragging=true;
+        lpLastX=lpStartX; lpLastY=lpStartY;
+        if(navigator.vibrate) navigator.vibrate(30);
+        window.parent.postMessage({type:'orb-mobile-dragstart'},'*');
+      },500);
+    },{passive:true});
+
+    canvas.addEventListener('touchmove',function(e){
+      var dx=Math.abs(e.touches[0].clientX-lpStartX);
+      var dy=Math.abs(e.touches[0].clientY-lpStartY);
+      if(lpTimer&&(dx>15||dy>15)){ clearTimeout(lpTimer); lpTimer=null; }
+      if(!lpDragging) return;
+      e.preventDefault();
+      var newX=e.touches[0].clientX;
+      var newY=e.touches[0].clientY;
+      if(lpLastX!==null){
+        window.parent.postMessage({
+          type:'orb-mobile-dragmove',
+          dx:newX-lpLastX,
+          dy:newY-lpLastY
+        },'*');
+      }
+      lpLastX=newX; lpLastY=newY;
+    },{passive:false});
+
+    canvas.addEventListener('touchend',function(e){
+      if(lpTimer){ clearTimeout(lpTimer); lpTimer=null; }
+      if(lpDragging){
+        lpDragging=false; lpLastX=null; lpLastY=null;
+        window.parent.postMessage({type:'orb-mobile-dragend'},'*');
+        window._orbIgnoreNextTouch=true;
+        return;
+      }
+    },{passive:true});
+  }
+})();
+</script>
+</body>
+</html>
